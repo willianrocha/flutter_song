@@ -1,8 +1,15 @@
+import 'dart:io';
+import 'dart:typed_data';
+
 import 'package:flutter/material.dart';
 import 'package:audioplayer/audioplayer.dart';
+import 'package:flutter/services.dart';
+import 'package:path_provider/path_provider.dart';
 import 'dart:async';
 
 void main() => runApp(new FlutterSong());
+
+enum PlayerState { stopped, playing, paused }
 
 class FlutterSong extends StatelessWidget {
   // This widget is the root of your application.
@@ -37,36 +44,89 @@ class GloriousPage extends StatefulWidget {
 }
 
 class _SadGridState extends State<GloriousPage> {
+  AudioPlayer audioPlayer = new AudioPlayer();
+  PlayerState playerState = PlayerState.stopped;
+  String kUrl = 'assets/audio2.mp3';
+  String localFilePath;
+  String currentAsset;
+  get isPlaying => playerState == PlayerState.playing;
+  get isPaused => playerState == PlayerState.paused;
 
-  static play() async {
-    final AudioPlayer _audioPlugin = new AudioPlayer();
-    final _audio = 'assets/hairy_song.mp3';
-    await _audioPlugin.play(_audio);
+  StreamSubscription _positionSubscription;
+  StreamSubscription _audioPlayerStateSubscription;
+  Duration duration;
+  Duration position;
+
+  @override
+  void initState() {
+    super.initState();
+    initAudioPlayer();
   }
 
-  Widget songs = GridView.count(
-    crossAxisCount: 2,
-//    padding: const EdgeInsets.all(20.0),
-//    crossAxisSpacing: 10.0,
-    children: <Widget>[
-      const Text("Ibagem legal 1"),
-      const Text("Ibagem legal 2"),
-      new RaisedButton(
-        elevation: 4.0,
-        splashColor: Colors.blueGrey,
-        onPressed: play,
-//        onPressed: () {
-//          final AudioPlayer audioPlugin = new AudioPlayer();
-////          // Play Song
-//           audioPlugin.play('assets/hairy_song.mp3', isLocal: true);
-//        },
-        child: new ConstrainedBox(
-            constraints: new BoxConstraints.expand(),
-            child: new Image(image: new AssetImage('assets/hairy_img.PNG'))
-        ),
-      ),
-    ],
-  );
+  void initAudioPlayer() {
+    audioPlayer = new AudioPlayer();
+    _positionSubscription = audioPlayer.onAudioPositionChanged.listen(
+            (p) => setState(() => position = p)
+    );
+    _audioPlayerStateSubscription = audioPlayer.onPlayerStateChanged.listen((s) {
+      if (s == AudioPlayerState.PLAYING) {
+        setState(() => duration = audioPlayer.duration);
+      } else if (s == AudioPlayerState.STOPPED) {
+        onComplete();
+        setState(() {
+          position = duration;
+        });
+      }
+    }, onError: (msg) {
+      setState(() {
+        playerState = PlayerState.stopped;
+        duration = new Duration(seconds: 0);
+        position = new Duration(seconds: 0);
+      });
+    });
+  }
+
+  void onComplete() {
+    setState(() => playerState = PlayerState.stopped);
+  }
+
+  Future _loadAsset(aPlay) async {
+    final dir = await getApplicationDocumentsDirectory();
+    final file = new File('${dir.path}/audio.mp3');
+
+    ByteData asset = await rootBundle.load(aPlay);
+    List<int> fBytes = new List(asset.lengthInBytes);
+    for(var i=0; i < asset.lengthInBytes; i++) {
+      try {
+        fBytes[i] = asset.getInt8(i);
+      } catch (e) {
+        print(i);
+        i = asset.lengthInBytes;
+      }
+    }
+    await file.writeAsBytes(fBytes);
+    if (await file.exists()) {
+      debugPrint(file.path);
+      setState(() {
+        localFilePath = file.path;
+      });
+    }
+    return localFilePath;
+  }
+
+  Future<void> play() async {
+    var aPath = await _loadAsset(currentAsset);
+    await audioPlayer.play(aPath);
+    setState(() => playerState = PlayerState.playing);
+  }
+
+  Future stop() async {
+    await audioPlayer.stop();
+    setState(() {
+      playerState = PlayerState.stopped;
+      position = new Duration();
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -75,7 +135,29 @@ class _SadGridState extends State<GloriousPage> {
         appBar: AppBar(
           title: Text("Hey Yeah")
         ),
-      body: songs,
+      body: new Column(
+        children: [
+          new RaisedButton(
+            elevation: 4.0,
+            splashColor: Colors.blueGrey,
+            onPressed: () {
+              setState(() {
+                currentAsset = "assets/hairy_song.mp3";
+              });
+              play();
+            },
+            child: new ConstrainedBox(
+                constraints: new BoxConstraints(maxHeight: 300.0, maxWidth: 300.0),
+                child: new Image(image: new AssetImage('assets/hairy_img.PNG'))
+            ),
+          ),
+          new IconButton(
+              onPressed: isPlaying || isPaused ? () => stop() : null,
+              iconSize: 64.0,
+              icon: new Icon(Icons.stop),
+              color: Colors.cyan),
+        ]
+      ),
       ),
     );
   }
